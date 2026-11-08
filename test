@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+ content="width=device-width, initial-scale=1, maximum-scale=1">
+
+<title>Vienna FlightWall</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #05080b;
+  color: #d9e6ed;
+  font-family: "Courier New", monospace;
+}
+
+/* HEADER */
+
+header {
+  background: #0b1219;
+  padding: 18px 14px;
+  border-bottom: 2px solid #1b3547;
+}
+
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0;
+  letter-spacing: 2px;
+  color: #5bd9ff;
+}
+
+#status {
+  color: #5be0a1;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.subtitle {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #7895a7;
+  letter-spacing: 1px;
+}
+
+/* INFO */
+
+.info-bar {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #0a1118;
+  border-bottom: 1px solid #1b2935;
+  font-size: 11px;
+  color: #8ca6b7;
+}
+
+.info-bar span {
+  color: #5bd9ff;
+}
+
+/* FLIGHT BOARD */
+
+.board {
+  padding: 8px;
+}
+
+.flight {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 10px;
+  padding: 14px 8px;
+  margin-bottom: 5px;
+  background: #0d151d;
+  border-left: 2px solid #18394c;
+}
+
+.flight-icon {
+  font-size: 24px;
+  color: #5bd9ff;
+  text-align: center;
+  align-self: center;
+}
+
+.flight-main {
+  min-width: 0;
+}
+
+.flight-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.callsign {
+  color: #f2f8ff;
+  font-size: 17px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.distance {
+  color: #5bd9ff;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.flight-type {
+  font-size: 10px;
+  color: #7895a7;
+  margin-top: 5px;
+}
+
+.flight-data {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.data-label {
+  color: #607b8d;
+  font-size: 9px;
+  margin-bottom: 4px;
+}
+
+.data-value {
+  color: #d8eaf5;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.heading {
+  color: #f2c94c;
+}
+
+/* FOOTER */
+
+footer {
+  text-align: center;
+  padding: 18px 10px;
+  font-size: 10px;
+  color: #496273;
+  border-top: 1px solid #1b2935;
+}
+
+/* LOADING */
+
+#loading {
+  text-align: center;
+  padding: 40px 15px;
+  color: #5bd9ff;
+  font-size: 12px;
+}
+
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="header-top">
+    <h1>✈ FLIGHTWALL</h1>
+    <span id="status">● CONNECTING</span>
+  </div>
+
+  <div class="subtitle">
+    AIR TRAFFIC MONITOR · LOCAL AREA
+  </div>
+</header>
+
+<div class="info-bar">
+  <div>TRAFFIC <span id="count">0</span></div>
+  <div>RADIUS <span id="radius">50 KM</span></div>
+  <div>UPDATE <span id="updated">--:--:--</span></div>
+</div>
+
+<div class="board" id="board">
+  <div id="loading">
+    INITIALIZING AIRCRAFT RADAR...
+  </div>
+</div>
+
+<footer>
+  ADS-B DATA · adsb.lol<br>
+  DATA REFRESH: 15 SEC
+</footer>
+
+<script>
+
+const RADIUS_NM = 27;
+const UPDATE_INTERVAL = 15000;
+
+let LAT = 48.2082;
+let LON = 16.3738;
+
+const board = document.getElementById("board");
+const status = document.getElementById("status");
+
+function distanceNM(lat1, lon1, lat2, lon2) {
+
+  const rad = Math.PI / 180;
+
+  const dLat = (lat2 - lat1) * rad;
+  const dLon = (lon2 - lon1) * rad;
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * rad) *
+    Math.cos(lat2 * rad) *
+    Math.sin(dLon / 2) ** 2;
+
+  return 3440.065 *
+    2 *
+    Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatAltitude(value) {
+
+  if (typeof value !== "number") {
+    return "N/A";
+  }
+
+  if (value === "ground") {
+    return "GROUND";
+  }
+
+  return Math.round(value).toLocaleString("de-DE") + " FT";
+}
+
+function formatSpeed(value) {
+
+  if (typeof value !== "number") {
+    return "N/A";
+  }
+
+  return Math.round(value * 1.852) + " KM/H";
+}
+
+function formatHeading(value) {
+
+  if (typeof value !== "number") {
+    return "N/A";
+  }
+
+  return Math.round(value) + "°";
+}
+
+function createFlight(plane) {
+
+  const callsign =
+    (plane.flight || plane.hex || "UNKNOWN").trim();
+
+  const aircraftType = plane.t || "AIRCRAFT";
+
+  const heading = plane.track || 0;
+
+  const distance = distanceNM(
+    LAT,
+    LON,
+    plane.lat,
+    plane.lon
+  );
+
+  return `
+    <div class="flight">
+
+      <div class="flight-icon">
+        <span style="display:inline-block;
+          transform:rotate(${heading}deg)">
+          ✈
+        </span>
+      </div>
+
+      <div class="flight-main">
+
+        <div class="flight-top">
+
+          <div class="callsign">
+            ${callsign}
+          </div>
+
+          <div class="distance">
+            ${distance.toFixed(1)} NM
+          </div>
+
+        </div>
+
+        <div class="flight-type">
+          ${aircraftType} · ${plane.hex || "N/A"}
+        </div>
+
+        <div class="flight-data">
+
+          <div>
+            <div class="data-label">ALTITUDE</div>
+            <div class="data-value">
+              ${formatAltitude(plane.alt_baro)}
+            </div>
+          </div>
+
+          <div>
+            <div class="data-label">SPEED</div>
+            <div class="data-value">
+              ${formatSpeed(plane.gs)}
+            </div>
+          </div>
+
+          <div>
+            <div class="data-label">HEADING</div>
+            <div class="data-value heading">
+              ${formatHeading(plane.track)}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  `;
+}
+
+async function updateFlights() {
+
+  try {
+
+    const url =
+      `https://api.adsb.lol/v2/lat/${LAT}/lon/${LON}/dist/${RADIUS_NM}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error("API unavailable");
+    }
+
+    const data = await response.json();
+
+    const aircraft = data.ac || [];
+
+    const visibleAircraft = aircraft
+      .filter(plane =>
+        plane.lat != null &&
+        plane.lon != null
+      )
+      .map(plane => ({
+        ...plane,
+        distance: distanceNM(
+          LAT,
+          LON,
+          plane.lat,
+          plane.lon
+        )
+      }))
+      .sort((a, b) => a.distance - b.distance);
+
+    document.getElementById("count").textContent =
+      visibleAircraft.length;
+
+    document.getElementById("updated").textContent =
+      new Date().toLocaleTimeString("de-DE");
+
+    if (visibleAircraft.length === 0) {
+
+      board.innerHTML = `
+        <div id="loading">
+          NO AIRCRAFT DETECTED
+        </div>
+      `;
+
+    } else {
+
+      board.innerHTML = visibleAircraft
+        .map(createFlight)
+        .join("");
+
+    }
+
+    status.textContent =
+      "● LIVE";
+
+    status.style.color = "#5be0a1";
+
+  } catch (error) {
+
+    status.textContent =
+      "● CONNECTION ERROR";
+
+    status.style.color = "#ff6565";
+
+    console.error(error);
+
+  }
+
+}
+
+/* IPHONE LOCATION */
+
+function useLocation() {
+
+  if (!navigator.geolocation) {
+
+    updateFlights();
+    return;
+
+  }
+
+  navigator.geolocation.getCurrentPosition(
+
+    position => {
+
+      LAT = position.coords.latitude;
+      LON = position.coords.longitude;
+
+      updateFlights();
+
+    },
+
+    error => {
+
+      console.log(
+        "Location unavailable. Using Vienna.",
+        error
+      );
+
+      updateFlights();
+
+    },
+
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000
+    }
+
+  );
+
+}
+
+useLocation();
+
+setInterval(updateFlights, UPDATE_INTERVAL);
+
+</script>
+
+</body>
+</html>
